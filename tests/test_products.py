@@ -79,3 +79,46 @@ def test_link_conflicts_require_new_profile_or_explicit_address_approval(tmp_pat
         product_decision={"mode": "new"},
     )
     assert new["product"]["id"] != old["product"]["id"]
+
+
+@pytest.mark.parametrize("accept_address_change", [False, True])
+def test_correcting_old_arrival_batch_keeps_historical_product_version(tmp_path, accept_address_change):
+    from app.products import Products
+    from app.records import Records
+
+    records = Records(tmp_path)
+    old_receipt = records.create_receipt([make_image(tmp_path)])
+    old = records.confirm_receipt(
+        old_receipt["id"],
+        fields=verified_fields(),
+        operator="王检验",
+        expected_version=0,
+        grouping_reviewed=True,
+    )
+    recent_receipt = records.create_receipt([make_image(tmp_path)])
+    records.confirm_receipt(
+        recent_receipt["id"],
+        fields=verified_fields(address="新厂址B"),
+        operator="王检验",
+        expected_version=0,
+        grouping_reviewed=True,
+        product_decision={"mode": "link", "id": old["product"]["id"], "accept_address_change": True},
+    )
+    corrected = records.confirm_receipt(
+        old_receipt["id"],
+        fields=verified_fields(lot="00999"),
+        operator="李检验",
+        expected_version=1,
+        grouping_reviewed=True,
+        reason="核实旧送货单，仅更正批号",
+        product_decision={
+            "mode": "link",
+            "id": old["product"]["id"],
+            "accept_address_change": accept_address_change,
+        },
+    )
+    assert corrected["fields"]["lot"]["value"] == "00999"
+    assert corrected["product"] == old["product"]
+    versions = Products(tmp_path).get(old["product"]["id"])["versions"]
+    assert len(versions) == 2
+    assert versions[-1]["address"] == "新厂址B"

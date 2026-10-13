@@ -193,3 +193,17 @@ def test_saving_draft_preserves_pending_product_choice_and_region_corrections(tm
         assert draft["region_labels"] == {f"{image_id}:0": "产品名称：复配稳定剂"}
         assert draft["product_decision"] == {"mode": "new"}
         assert draft["grouping_reviewed"] is True
+
+
+def test_invalid_template_mapping_is_rejected_at_save_without_destroying_previous_config(tmp_path):
+    from app.main import create_app
+
+    source = template(tmp_path)
+    with TestClient(create_app(tmp_path / "data", engine=PrintedLabelEngine())) as client:
+        client.post("/api/template", files={"file": (source.name, source.read_bytes())})
+        assert client.put("/api/template/config", json=mapping()).status_code == 200
+        invalid = mapping()
+        invalid["columns"]["operator"] = "A"
+        rejected = client.put("/api/template/config", json=invalid)
+        assert rejected.status_code == 400
+        assert client.get("/api/state").json()["template"]["config"]["columns"]["operator"] == "I"

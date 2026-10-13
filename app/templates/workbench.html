@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>品控图片工作台</title><link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/workbench.js" defer></script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">品</span><div><h1>品控图片工作台</h1><p>本地测试版<span class="status-dot"></span>照片与记录保存在本机</p></div></div>
+    <nav aria-label="主导航"><button class="tab active" data-page="workbench" aria-current="page">图片复核</button><button class="tab" data-page="records">记录与导出</button></nav>
+    <label class="operator">操作人<input id="operator" autocomplete="name" placeholder="请输入姓名"></label>
+  </header>
+  <div id="notice" role="status" class="notice" hidden></div><div id="error" role="alert" class="notice error" hidden></div>
+  <main>
+    <section id="page-workbench" class="workbench" aria-label="图片复核">
+      <aside class="queue panel">
+        <div class="panel-heading"><h2>照片与图片组</h2><span id="image-total" class="count">0 张</span></div>
+        <label class="import-control" for="image-import"><span class="plus">＋</span><strong>导入包装照片</strong><small>JPG / PNG / WebP / BMP，支持多选</small></label>
+        <input id="image-import" type="file" accept="image/jpeg,image/png,image/webp,image/bmp" multiple class="file-input" aria-label="导入包装照片">
+        <p id="import-progress" class="muted" hidden></p>
+        <div class="queue-actions"><button id="suggest-groups" class="secondary">建议分组</button><button id="create-group" class="secondary">选中照片新建记录</button></div>
+        <div class="queue-scroll"><section id="ungrouped-zone" class="drop-zone"><div class="section-heading"><h3>待分组</h3><span id="ungrouped-count" class="count">0</span></div><p class="hint">无法确定归属时，补拍或核实资料后归组。</p><div id="ungrouped-list"></div></section><div class="section-heading"><h3>来料图片组</h3><span id="group-count" class="count">0</span></div><div id="group-list"></div></div>
+      </aside>
+      <section class="image-panel panel" aria-label="原图与文字依据">
+        <div class="panel-heading"><div><h2>原图复核</h2><span id="image-name" class="muted">选择一张照片</span></div><div class="zoom-controls"><button id="zoom-out" title="缩小" aria-label="缩小原图">−</button><output id="zoom-value">100%</output><button id="zoom-in" title="放大" aria-label="放大原图">＋</button></div></div>
+        <div id="image-tabs" class="image-tabs"></div>
+        <div id="image-stage" class="image-stage"><div class="empty-state"><span class="empty-image" aria-hidden="true">▧</span><h3>从包装照片开始</h3><p>导入照片，再选择同一产品、同一批号的照片建立来料记录。</p></div></div>
+        <div class="ocr-section"><div class="section-heading"><h3>识别文字</h3><span id="ocr-status" class="muted"></span></div><p id="evidence-instruction" class="hint">选择右侧字段后，点选文字区域可作为该字段的图片依据。</p><div id="ocr-blocks" class="ocr-blocks"></div></div>
+      </section>
+      <section class="review-panel panel" aria-label="字段核对">
+        <div class="panel-heading"><div><h2>字段核对</h2><span id="receipt-caption" class="muted">每次来料独立登记</span></div><button id="reload-candidates" class="text-button" hidden>更新候选</button></div>
+        <div id="review-empty" class="empty-state"><h3>先建立或选择图片组</h3><p>对照照片核对七个字段，再人工确认。产品历史资料仅供参考。</p></div>
+        <form id="review-form" hidden novalidate>
+          <div id="fields-list"></div>
+          <details class="product-section" open><summary>产品档案与历史资料</summary><p class="hint">选择已有档案或新建；批号和日期每次重新核对。</p><button type="button" id="match-products" class="secondary">查找历史产品</button><div id="product-candidates"><label class="product-option"><input type="radio" name="product-choice" value="new" checked> 新建产品档案</label></div><label class="check-row" id="address-change-row" hidden><input type="checkbox" id="address-change"> 已核实地址变化，同意新增档案版本</label></details>
+          <label class="change-reason" id="change-reason-row" hidden>修改原因与资料来源<textarea id="change-reason" rows="2" placeholder="说明更正内容及核实依据"></textarea></label>
+          <details class="history-section" id="history-section" hidden><summary>查看确认与修改历史</summary><div id="history-content"></div></details>
+          <button type="button" id="void-record" class="secondary" hidden>作废空记录</button>
+          <div class="confirmation"><label class="check-row"><input type="checkbox" id="grouping-reviewed"> 已检查本组照片属于同一产品、同一批号</label><div class="confirmation-actions"><button type="button" id="save-draft" class="secondary">保存草稿</button><button type="submit" id="confirm-record" class="primary">确认并保存记录</button></div><p id="draft-status" class="hint">尚未确认的内容不会进入 Excel。</p></div>
+        </form>
+      </section>
+    </section>
+    <section id="page-records" class="records-page" hidden aria-label="记录与导出">
+      <div class="page-title"><div><h2>来料记录</h2><p>按首次录入日期、产品或批号筛选。每次导出生成独立文件。</p></div><button id="export-records" class="primary">导出 Excel</button></div>
+      <div class="filters"><label>录入日期从<input id="filter-from" type="date"></label><label>至<input id="filter-to" type="date"></label><label>产品档案<select id="filter-product" aria-label="产品档案"><option value="">全部产品</option></select></label><label>批号<input id="filter-lot" placeholder="精确批号，保留前导零"></label><button id="apply-filter" class="secondary">筛选</button><button id="clear-filter" class="text-button">清除</button></div>
+      <p id="records-summary" class="hint"></p><div class="table-scroll"><table><thead><tr><th>产品 / 规格</th><th>生产厂商</th><th>批号</th><th>生产日期</th><th>保质期</th><th>录入时间 / 操作人</th><th>状态</th><th>操作</th></tr></thead><tbody id="records-body"></tbody></table></div><div id="export-result"></div>
+      <details class="template-section" open><summary>Excel 模板设置</summary><p class="hint">上传现有 .xlsx 模板，并指定空白数据区域。先检查一次导出文件的格式和列位置。</p><label class="template-upload">上传 Excel 模板<input id="template-upload" type="file" accept=".xlsx" aria-label="上传 Excel 模板"></label><span id="template-name" class="muted">尚未上传模板</span><form id="template-form" hidden><div class="template-settings"><label>工作表<select id="template-sheet" aria-label="工作表"></select></label><label>数据起始行<input id="template-start" type="number" min="1" value="2"></label><label>数据结束行<input id="template-end" type="number" min="1" value="1000"></label><label>生产日期输出<select id="date-mode"><option value="normalized">确认值（明确日期统一格式）</option><option value="raw">原文</option></select></label><label>未标注输出<select id="missing-mode"><option value="with_reason">未标注及原因</option><option value="label">仅“未标注”</option></select></label></div><div id="column-mapping" class="column-mapping"></div><button class="secondary" type="submit">保存模板映射</button><span id="template-status" class="hint"></span></form></details>
+      <details class="samples-section"><summary>纠错样本 <span id="sample-count">0</span></summary><p class="hint">只有与图片文字区域对应的校对才成为候选样本。资料补填不作为图片标签；保存不会触发模型训练。</p><div id="sample-list"></div></details>
+    </section>
+  </main>
+  <dialog id="action-dialog"><form method="dialog"><div class="panel-heading"><h2 id="dialog-title">调整照片归属</h2><button value="cancel" aria-label="关闭">×</button></div><div id="dialog-content"></div><div class="dialog-actions"><button value="cancel" class="secondary">取消</button><button id="dialog-confirm" value="confirm" class="primary">确定</button></div></form></dialog>
+  <footer class="app-footer"><span id="connection-status">正在连接本地服务…</span><span>图片 → 归组 → 核对 → 确认 → Excel</span></footer>
+</body>
+</html>

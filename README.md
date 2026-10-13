@@ -18,6 +18,8 @@
 
 需求和阶段安排见 [产品需求文档](docs/PRD.md) 与 [开发计划](docs/superpowers/plans/2026-10-13-local-cpu-mvp.md)。
 
+已实现范围、测试证据、审查修复与待验收项见 [本地测试版交付记录](docs/IMPLEMENTATION_REPORT.md)。
+
 ## 首期范围
 
 - 基于 PaddleOCR，先在单台电脑上使用 CPU 测试。

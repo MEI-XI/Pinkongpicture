@@ -1,15 +1,38 @@
 from copy import copy
 from datetime import date
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
 from openpyxl.formula.translate import Translator
 from openpyxl.utils import column_index_from_string
+from pydantic import BaseModel, Field, model_validator
 
 from app.domain import FIELDS
 from app.records import Records
+
+
+class TemplateMapping(BaseModel):
+    sheet: str = Field(min_length=1)
+    start_row: int = Field(ge=1, le=1048576)
+    end_row: int = Field(ge=1, le=1048576)
+    columns: dict[str, str]
+    date_mode: Literal["raw", "normalized"]
+    missing_mode: Literal["with_reason", "label"]
+
+    @model_validator(mode="after")
+    def validate_region(self):
+        if self.end_row < self.start_row:
+            raise ValueError("数据结束行不能早于起始行")
+        if set(self.columns) != {*FIELDS, "entered_at", "operator"}:
+            raise ValueError("请映射七个字段、录入时间和操作人")
+        self.columns = {key: value.strip().upper() for key, value in self.columns.items()}
+        numbers = [column_index_from_string(value) for value in self.columns.values()]
+        if len(set(numbers)) != 9 or any(number > 16384 for number in numbers):
+            raise ValueError("每个字段必须映射到不同的有效列")
+        return self
 
 
 class ExcelExporter:
@@ -19,6 +42,7 @@ class ExcelExporter:
         self.directory.mkdir(parents=True, exist_ok=True)
 
     def export_confirmed(self, template: Path, config: dict, selection=None):
+        config = TemplateMapping.model_validate(config).model_dump()
         selection = selection or {}
         for key in ("date_from", "date_to"):
             if selection.get(key):
@@ -32,7 +56,9 @@ class ExcelExporter:
         if Path(template).suffix.lower() != ".xlsx":
             raise ValueError("当前仅支持 .xlsx 模板，请先转换旧版 .xls 并核对格式")
         receipts = self.records.list()
-        rows = [receipt["confirmed"] for receipt in receipts if receipt["confirmed"]]
+        rows = [
+            receipt["confirmed"] for receipt in receipts if receipt["confirmed"] and not receipt.get("voided")
+        ]
         rows = [
             row
             for row in rows
@@ -66,6 +92,7 @@ class ExcelExporter:
             "label",
         }:
             raise ValueError("请选择日期和未标注信息的输出方式")
+        original_last_row = sheet.max_row
         for row in range(start, min(end, max(sheet.max_row, start)) + 1):
             for column in columns.values():
                 cell = sheet.cell(row, column)
@@ -74,10 +101,12 @@ class ExcelExporter:
         for offset, record in enumerate(rows):
             row = start + offset
             if offset:
-                sheet.row_dimensions[row].height = sheet.row_dimensions[start].height
+                if row > original_last_row:
+                    sheet.row_dimensions[row].height = sheet.row_dimensions[start].height
                 for column in range(1, sheet.max_column + 1):
                     source, target = sheet.cell(start, column), sheet.cell(row, column)
-                    target._style = copy(source._style)
+                    if row > original_last_row:
+                        target._style = copy(source._style)
                     if source.data_type == "f" and target.value is None and column not in columns.values():
                         target.value = Translator(source.value, origin=source.coordinate).translate_formula(
                             target.coordinate

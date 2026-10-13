@@ -6,10 +6,21 @@ from uuid import uuid4
 from app.domain import FIELDS, FieldValue
 from app.extraction import normalize_date
 from app.images import ImageStore
-from app.products import Products
+from app.products import PROFILE, Products
 from app.storage import Store
 
 BEIJING = timezone(timedelta(hours=8))
+
+
+def changed_evidence(before, after):
+    """Region labels need a fresh review when the business value or evidence changes."""
+    changed = set()
+    for key in set(before) | set(after):
+        old, new = before.get(key, {}), after.get(key, {})
+        if any(old.get(part) != new.get(part) for part in ("value", "source", "refs")):
+            changed.update(old.get("refs", []))
+            changed.update(new.get("refs", []))
+    return changed
 
 
 class Records:
@@ -56,7 +67,31 @@ class Records:
         return self.store.list("receipt")
 
     def list_confirmed(self):
-        return [record["confirmed"] for record in self.list() if record["confirmed"]]
+        return [
+            record["confirmed"] for record in self.list() if record["confirmed"] and not record.get("voided")
+        ]
+
+    def void_receipt(self, identifier, *, operator, reason, expected_version):
+        if not operator.strip() or not reason.strip():
+            raise ValueError("作废需要填写操作人和核实原因")
+        with self.store.transaction() as connection:
+            receipt = self.store.get("receipt", identifier, connection)
+            if receipt["version"] != expected_version:
+                raise ValueError("记录已发生变化，请刷新后重新核对")
+            if receipt.get("voided") or not receipt["confirmed"] or receipt["draft"]["image_ids"]:
+                raise ValueError("仅可作废已确认且照片已全部移出的空记录")
+            receipt["voided"] = {
+                "operator": operator,
+                "reason": reason,
+                "at": self.clock().astimezone(BEIJING).isoformat(timespec="seconds"),
+            }
+            receipt.update(pending=False, version=receipt["version"] + 1)
+            for sample in self.store.list("sample", connection):
+                if sample["receipt_id"] == identifier:
+                    sample["status"] = "superseded"
+                    self.store.put("sample", sample["id"], sample, connection)
+            self.store.put("receipt", identifier, receipt, connection)
+        return receipt
 
     def move_image(self, image_id, target_id, *, operator, reason, expected_versions):
         if not operator.strip() or not reason.strip():
@@ -68,6 +103,8 @@ class Records:
             target = next((row for row in receipts if row["id"] == target_id), None)
             if target_id is not None and target is None:
                 raise ValueError("目标图片组不存在")
+            if target and target.get("voided"):
+                raise ValueError("不能把照片归入已作废记录")
             if source is target:
                 return
             for receipt in [row for row in (source, target) if row is not None]:
@@ -94,6 +131,9 @@ class Records:
                     for ref, label in receipt["draft"].get("region_labels", {}).items()
                     if ref in available
                 }
+                receipt["draft"]["reviewed_region_refs"] = [
+                    ref for ref in receipt["draft"].get("reviewed_region_refs", []) if ref in available
+                ]
                 receipt.update(pending=True, version=receipt["version"] + 1)
                 receipt["changes"].append(
                     {
@@ -117,9 +157,12 @@ class Records:
         grouping_reviewed=False,
         region_labels=None,
         product_decision=None,
+        reviewed_region_refs=None,
     ):
         with self.store.transaction() as connection:
             receipt = self.store.get("receipt", identifier, connection)
+            if receipt.get("voided"):
+                raise ValueError("已作废记录仅供查看历史")
             if receipt["version"] != expected_version:
                 raise ValueError("记录已发生变化，请刷新后重新核对")
             if not operator.strip() or (receipt["confirmed"] and not reason.strip()):
@@ -130,7 +173,13 @@ class Records:
             }
             receipt["draft"]["grouping_reviewed"] = grouping_reviewed
             if region_labels is not None:
-                receipt["draft"]["region_labels"] = region_labels
+                invalid = changed_evidence(before["fields"], receipt["draft"]["fields"])
+                receipt["draft"]["region_labels"] = {
+                    ref: label
+                    for ref, label in region_labels.items()
+                    if ref not in invalid or ref in (reviewed_region_refs or [])
+                }
+            receipt["draft"]["reviewed_region_refs"] = reviewed_region_refs or []
             if product_decision is not None:
                 receipt["draft"]["product_decision"] = product_decision
             receipt["changes"].append(
@@ -157,11 +206,14 @@ class Records:
         reason="",
         product_decision=None,
         region_labels=None,
+        reviewed_region_refs=None,
     ):
         if not operator.strip() or not grouping_reviewed:
             raise ValueError("请填写操作人，并确认图片属于同一产品、同一批号")
         with self.store.transaction() as connection:
             receipt = self.store.get("receipt", identifier, connection)
+            if receipt.get("voided"):
+                raise ValueError("已作废记录不能重新确认")
             if receipt["version"] != expected_version:
                 raise ValueError("记录已发生变化，请刷新后重新核对")
             if receipt["confirmed"] and not reason.strip():
@@ -203,12 +255,27 @@ class Records:
                     # remains in immutable image blocks, not in an exportable wrong date.
                     date_field["raw"] = date_field["value"]
                 date_field["value"] = normalize_date(date_field["value"])
+            previous = receipt["confirmed"]
             if product_decision is None:
-                previous = receipt["confirmed"]
                 product_decision = (
                     {"mode": "link", "id": previous["product"]["id"]} if previous else {"mode": "new"}
                 )
-            product = self.products.link_product(values, product_decision, connection)
+            if (
+                previous
+                and product_decision.get("mode") == "link"
+                and product_decision.get("id") == previous["product"]["id"]
+                and all(values[key]["value"] == previous["fields"][key]["value"] for key in PROFILE)
+            ):
+                product = deepcopy(previous["product"])
+            else:
+                product = self.products.link_product(values, product_decision, connection)
+            invalid_labels = changed_evidence(previous["fields"], values) if previous else set()
+            safe_labels = {
+                ref: label
+                for ref, label in (region_labels or {}).items()
+                if ref in available_refs
+                and (ref not in invalid_labels or ref in (reviewed_region_refs or []))
+            }
             snapshot = {
                 "id": identifier,
                 "version": len(receipt["history"]) + 1,
@@ -219,14 +286,15 @@ class Records:
                 "confirmed_at": timestamp,
                 "reason": reason,
                 "product": product,
-                "region_labels": region_labels or {},
+                "region_labels": safe_labels,
             }
             receipt["confirmed"] = snapshot
             receipt["history"].append(deepcopy(snapshot))
             receipt["draft"].update(
                 fields=deepcopy(values),
                 grouping_reviewed=True,
-                region_labels=region_labels or {},
+                region_labels=safe_labels,
+                reviewed_region_refs=[],
                 product_decision={"mode": "link", "id": product["id"]},
             )
             receipt.update(entered_at=entered, pending=False, version=receipt["version"] + 1)

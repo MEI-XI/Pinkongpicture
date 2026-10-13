@@ -9,7 +9,7 @@ from openpyxl import load_workbook
 from pydantic import BaseModel, Field
 
 from app.domain import FIELDS, FieldValue
-from app.excel import ExcelExporter
+from app.excel import ExcelExporter, TemplateMapping
 from app.extraction import extract_candidates
 from app.grouping import propose_groups
 from app.samples import Samples
@@ -30,6 +30,13 @@ class RecordInput(BaseModel):
     reason: str = ""
     product_decision: dict = Field(default_factory=lambda: {"mode": "new"})
     region_labels: dict[str, str] = Field(default_factory=dict)
+    reviewed_region_refs: list[str] = Field(default_factory=list)
+
+
+class VoidInput(BaseModel):
+    operator: str
+    reason: str
+    expected_version: int
 
 
 class MoveInput(BaseModel):
@@ -114,6 +121,11 @@ def edit(request: Request, receipt_id: str, body: RecordInput):
     return request.app.state.records.edit_receipt(receipt_id, **body.model_dump())
 
 
+@router.post("/api/receipts/{receipt_id}/void")
+def void_receipt(request: Request, receipt_id: str, body: VoidInput):
+    return request.app.state.records.void_receipt(receipt_id, **body.model_dump())
+
+
 @router.post("/api/images/{image_id}/move")
 def move_image(request: Request, image_id: str, body: MoveInput):
     request.app.state.records.move_image(image_id, **body.model_dump())
@@ -162,7 +174,7 @@ def confirm(request: Request, receipt_id: str, body: RecordInput):
     record = records.confirm_receipt(receipt_id, **arguments)
     records.store.put("settings", "operator", {"id": "operator", "name": body.operator})
     try:
-        samples = Samples(request.app.state.root).collect_samples(record, body.region_labels)
+        samples = Samples(request.app.state.root).collect_samples(record, record["region_labels"])
         sample_status = {"status": "saved", "count": len(samples), "error": ""}
     except (OSError, ValueError) as exc:
         sample_status = {"status": "error", "count": 0, "error": str(exc)}
@@ -203,7 +215,10 @@ def upload_template(request: Request, file: UploadFile):
 def template_config(request: Request, body: dict):
     store = request.app.state.records.store
     config = store.get("settings", "template")
-    config["config"] = body
+    mapping = TemplateMapping.model_validate(body)
+    if mapping.sheet not in config["sheets"]:
+        raise ValueError("模板中没有选择的工作表")
+    config["config"] = mapping.model_dump()
     store.put("settings", "template", config)
     return {"saved": True}
 
