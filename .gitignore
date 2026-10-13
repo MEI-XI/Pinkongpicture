@@ -1,0 +1,31 @@
+# Local skill installation backups
+/skill-install-backups/
+
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+
+# Local product data, models and exports
+/data/
+/models/
+/exports/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.xlsx
+*.xls
+*.csv
+
+# Local logs and OS files
+*.log
+Thumbs.db
+.DS_Store
