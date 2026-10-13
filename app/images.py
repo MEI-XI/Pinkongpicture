@@ -14,7 +14,7 @@ class ImageStore:
         self.directory = self.store.root / "images"
         self.directory.mkdir(exist_ok=True)
 
-    def import_image(self, name: str, content: bytes) -> ImageAsset:
+    def import_image(self, name: str, content: bytes, import_batch="") -> ImageAsset:
         if len(content) > 30 * 1024 * 1024:
             raise ValueError("单张图片不能超过 30 MB")
         identifier = uuid4().hex
@@ -30,7 +30,14 @@ class ImageStore:
                 width, height = canonical.size
         except (UnidentifiedImageError, OSError) as exc:
             raise ValueError("图片损坏或格式不支持，请转换为 JPG 或 PNG") from exc
-        asset = ImageAsset(id=identifier, name=Path(name).name, path=path, width=width, height=height)
+        asset = ImageAsset(
+            id=identifier,
+            name=Path(name).name,
+            path=path,
+            width=width,
+            height=height,
+            import_batch=import_batch,
+        )
         self.save(asset)
         return asset
 

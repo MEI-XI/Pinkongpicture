@@ -1,7 +1,7 @@
 import os
 import threading
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from time import perf_counter
 
 from app.domain import OcrBlock
@@ -35,12 +35,18 @@ class PaddleEngine:
                 enable_mkldnn=False,
             )
         result = self.model.predict(input=str(asset.path))[0].json["res"]
-        return [OcrBlock(
-            id=f"{asset.id}:{index}", image_id=asset.id, text=text,
-            score=score, polygon=polygon,
-        ) for index, (text, score, polygon) in enumerate(zip(
-            result["rec_texts"], result["rec_scores"], result["rec_polys"], strict=True
-        ))]
+        return [
+            OcrBlock(
+                id=f"{asset.id}:{index}",
+                image_id=asset.id,
+                text=text,
+                score=score,
+                polygon=polygon,
+            )
+            for index, (text, score, polygon) in enumerate(
+                zip(result["rec_texts"], result["rec_scores"], result["rec_polys"], strict=True)
+            )
+        ]
 
 
 class OcrService:

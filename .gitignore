@@ -14,6 +14,7 @@ __pycache__/
 .ruff_cache/
 dist/
 build/
+node_modules/
 
 # Local configuration and credentials
 .env

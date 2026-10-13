@@ -40,8 +40,15 @@ def test_one_failed_ocr_does_not_discard_other_images(tmp_path):
         def recognize(self, asset):
             if asset.name == "bad.png":
                 raise RuntimeError("识别失败")
-            return [OcrBlock(id="b1", image_id=asset.id, text="批号:00123",
-                             polygon=[(1, 2), (55, 2), (55, 20), (1, 20)], score=0.91)]
+            return [
+                OcrBlock(
+                    id="b1",
+                    image_id=asset.id,
+                    text="批号:00123",
+                    polygon=[(1, 2), (55, 2), (55, 20), (1, 20)],
+                    score=0.91,
+                )
+            ]
 
     service = OcrService(images, Engine())
     service.submit([bad.id, good.id])

@@ -56,6 +56,7 @@ class Store:
         if connection is None:
             with self.transaction() as transaction:
                 return self.list(kind, transaction)
-        return [json.loads(row[0]) for row in connection.execute(
-            "SELECT body FROM documents WHERE kind=? ORDER BY rowid", (kind,)
-        )]
+        return [
+            json.loads(row[0])
+            for row in connection.execute("SELECT body FROM documents WHERE kind=? ORDER BY rowid", (kind,))
+        ]
